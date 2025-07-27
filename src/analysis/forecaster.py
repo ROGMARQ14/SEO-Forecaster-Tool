@@ -8,6 +8,20 @@ from typing import Dict
 logger = logging.getLogger(__name__)
 
 
+def safe_div(numerator, denominator, fallback=0):
+    """Safely divide two numbers, returning fallback if denominator is zero or invalid."""
+    try:
+        if denominator == 0 or pd.isna(denominator) or np.isinf(denominator):
+            return fallback
+        result = numerator / denominator
+        # Check for infinity or NaN result
+        if np.isinf(result) or pd.isna(result):
+            return fallback
+        return result
+    except (ZeroDivisionError, TypeError, ValueError):
+        return fallback
+
+
 class SEOForecaster:
     """Forecasts SEO performance based on current data."""
 
@@ -20,7 +34,7 @@ class SEOForecaster:
         }
 
     def forecast_performance(self, df: pd.DataFrame, days: int,
-                             avg_improvement: int) -> Dict:
+                           avg_improvement: int) -> Dict:
         """
         Forecast SEO performance for a given time period.
 
@@ -73,9 +87,9 @@ class SEOForecaster:
             raise
 
     def _calculate_improvement_factor(self, days: int,
-                                      avg_improvement: int) -> float:
+                                    avg_improvement: int) -> float:
         """Calculate realistic improvement factor based on time period."""
-        months = days / 30
+        months = safe_div(days, 30, 1)  # Use safe_div to avoid division by zero
         base_improvement = avg_improvement * months
 
         if avg_improvement <= 5:
@@ -115,7 +129,9 @@ class SEOForecaster:
             projected_clicks *= np.random.uniform(0.9, 1.1)
 
             click_increase = projected_clicks - current_clicks
-            improvement_pct = (click_increase / max(current_clicks, 1)) * 100
+            
+            # Use safe_div for improvement percentage calculation
+            improvement_pct = safe_div(click_increase, max(current_clicks, 1), 0) * 100
 
             forecasts.append({
                 'Keyword': keyword,
@@ -136,9 +152,12 @@ class SEOForecaster:
         """Calculate aggregate forecast metrics."""
         total_current = keyword_forecasts['Current Clicks'].sum()
         total_projected = keyword_forecasts['Projected Clicks'].sum()
-        clicks_increase_pct = (
-            (total_projected - total_current) /
-            max(total_current, 1)
+        
+        # Use safe_div for percentage calculation
+        clicks_increase_pct = safe_div(
+            (total_projected - total_current),
+            max(total_current, 1),
+            0
         ) * 100
 
         current_top_10 = len(
@@ -162,11 +181,11 @@ class SEOForecaster:
         """Calculate estimated traffic value based on clicks and CPC."""
         # Industry average CPC by search volume ranges
         cpc_mapping = {
-            0: 0.50,      # Very low volume
-            100: 1.20,    # Low volume
-            1000: 2.50,   # Medium volume
-            10000: 5.00,  # High volume
-            50000: 8.00   # Very high volume
+            0: 0.50,     # Very low volume
+            100: 1.20,   # Low volume
+            1000: 2.50,  # Medium volume
+            10000: 5.00, # High volume
+            50000: 8.00  # Very high volume
         }
 
         total_value = 0
@@ -215,7 +234,7 @@ class SEOForecaster:
         return results
 
     def create_timeline_forecast(self, df: pd.DataFrame,
-                                 improvement_rate: int) -> pd.DataFrame:
+                               improvement_rate: int) -> pd.DataFrame:
         """Create a monthly timeline forecast for visualization."""
         timeline_data = []
         months = list(range(1, 13))  # 12 months
@@ -236,7 +255,7 @@ class SEOForecaster:
         return pd.DataFrame(timeline_data)
 
     def calculate_roi_potential(self, df: pd.DataFrame, investment: float,
-                               improvement_rate: int) -> Dict:
+                              improvement_rate: int) -> Dict:
         """Calculate ROI potential based on investment and expected improvements."""
         try:
             forecast = self.forecast_performance(df, 360, improvement_rate)
@@ -247,8 +266,10 @@ class SEOForecaster:
                 forecast['total_current_clicks']
             )
 
-            roi = ((traffic_value - investment) / max(investment, 1)) * 100
-            payback_period = investment / max(traffic_value / 12, 1)
+            # Use safe_div for ROI and payback calculations
+            roi = safe_div((traffic_value - investment), max(investment, 1), 0) * 100
+            monthly_value = safe_div(traffic_value, 12, 0)
+            payback_period = safe_div(investment, max(monthly_value, 1), 0)
 
             return {
                 'investment': investment,
@@ -256,7 +277,7 @@ class SEOForecaster:
                 'clicks_increase_annual': clicks_increase,
                 'roi_percentage': round(roi, 1),
                 'payback_months': round(payback_period, 1),
-                'monthly_value': round(traffic_value / 12, 0)
+                'monthly_value': round(monthly_value, 0)
             }
 
         except Exception as e:
