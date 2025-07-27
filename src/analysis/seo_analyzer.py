@@ -77,6 +77,48 @@ class SEOAnalyzer:
             logger.error(f"Error calculating CTR by position: {e}")
             raise
 
+    def calculate_ctr_linear_table(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        NEW METHOD: Calculate linear CTR table for positions 1-100.
+        
+        Args:
+            df: DataFrame with merged GSC/SEMrush data
+            
+        Returns:
+            DataFrame with columns: Pos, Clicks, Impressions, CTR
+        """
+        try:
+            # Group by exact position and sum clicks/impressions
+            position_data = df.groupby('Current Position').agg({
+                'Clicks': 'sum',
+                'Impressions': 'sum'
+            }).reset_index()
+            
+            # Create full range 1-100
+            full_range = pd.DataFrame({'Pos': range(1, 101)})
+            
+            # Merge with actual data
+            merged = full_range.merge(
+                position_data.rename(columns={'Current Position': 'Pos'}),
+                on='Pos',
+                how='left'
+            ).fillna(0)
+            
+            # Calculate CTR using safe_div
+            merged['CTR'] = merged.apply(
+                lambda row: safe_div(row['Clicks'], row['Impressions']) * 100, 
+                axis=1
+            )
+            
+            # Apply smoothing to ensure monotonic decrease
+            merged['CTR'] = merged['CTR'].cummax()[::-1].cummin()[::-1]
+            
+            return merged[['Pos', 'Clicks', 'Impressions', 'CTR']]
+            
+        except Exception as e:
+            logger.error(f"Error calculating linear CTR table: {e}")
+            raise
+
     def get_ctr_for_position(self, position: float) -> float:
         """
         Get estimated CTR for a given position.
