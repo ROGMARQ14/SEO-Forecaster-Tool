@@ -27,10 +27,11 @@ class SEOForecaster:
 
     def __init__(self):
         """Initialize the SEO forecaster."""
-        self.improvement_curves = {
-            90: {'conservative': 0.3, 'moderate': 0.5, 'aggressive': 0.7},
-            120: {'conservative': 0.4, 'moderate': 0.6, 'aggressive': 0.8},
-            360: {'conservative': 0.6, 'moderate': 0.8, 'aggressive': 0.9}
+        # FIXED: More logical scaling for different periods
+        self.improvement_scaling = {
+            90: 0.25,   # 25% of full potential in 3 months
+            180: 0.60,  # 60% of full potential in 6 months  
+            360: 1.0    # 100% of full potential in 12 months
         }
 
     def forecast_performance(self, df: pd.DataFrame, days: int,
@@ -51,12 +52,12 @@ class SEOForecaster:
             analyzer = SEOAnalyzer()
             analyzer.calculate_ctr_by_position(df)
 
-            improvement_factor = self._calculate_improvement_factor(
-                days, avg_improvement
-            )
+            # FIXED: Use proper scaling based on time period
+            time_scaling = self.improvement_scaling.get(days, days / 360)
+            actual_improvement = avg_improvement * time_scaling
 
             keyword_forecasts = self._forecast_keywords(
-                df, improvement_factor, analyzer
+                df, actual_improvement, analyzer
             )
 
             total_metrics = self._calculate_aggregate_metrics(
@@ -89,17 +90,10 @@ class SEOForecaster:
     def _calculate_improvement_factor(self, days: int,
                                     avg_improvement: int) -> float:
         """Calculate realistic improvement factor based on time period."""
-        months = safe_div(days, 30, 1)  # Use safe_div to avoid division by zero
-        base_improvement = avg_improvement * months
-
-        if avg_improvement <= 5:
-            factor = base_improvement * 0.7
-        elif avg_improvement <= 10:
-            factor = base_improvement * 0.85
-        else:
-            factor = base_improvement * 0.95
-
-        return max(0.1, min(factor, avg_improvement * 2))
+        # REMOVED: Old inconsistent logic
+        # NEW: Direct scaling based on time period
+        time_scaling = self.improvement_scaling.get(days, days / 360)
+        return avg_improvement * time_scaling
 
     def _forecast_keywords(self, df: pd.DataFrame, improvement_factor: float,
                           analyzer) -> pd.DataFrame:
@@ -111,7 +105,10 @@ class SEOForecaster:
             search_volume = row['Search Volume']
             keyword = row['Keyword']
 
+            # Calculate position improvement based on current position
             max_improvement = min(improvement_factor, current_pos - 1)
+            
+            # Apply diminishing returns for already high-ranking keywords
             if current_pos <= 3:
                 max_improvement *= 0.3
             elif current_pos <= 10:
@@ -126,7 +123,9 @@ class SEOForecaster:
 
             current_clicks = search_volume * current_ctr
             projected_clicks = search_volume * projected_ctr
-            projected_clicks *= np.random.uniform(0.9, 1.1)
+            
+            # REMOVED: Random variation that made forecasts inconsistent
+            # projected_clicks *= np.random.uniform(0.9, 1.1)
 
             click_increase = projected_clicks - current_clicks
             
@@ -224,7 +223,7 @@ class SEOForecaster:
         results = {}
         for scenario_name, config in scenarios.items():
             scenario_results = {}
-            for days in [90, 120, 360]:
+            for days in [90, 180, 360]:
                 forecast = self.forecast_performance(
                     df, days, config['improvement']
                 )
