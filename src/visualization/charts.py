@@ -62,29 +62,39 @@ class ChartGenerator:
         return fig
     
     @staticmethod
-    def create_ctr_curve_chart(df: pd.DataFrame) -> go.Figure:
-        """Create CTR curve chart."""
+    def create_ctr_curve_chart(linear_ctr_data: pd.DataFrame) -> go.Figure:
+        """
+        FIXED: Create linear CTR curve chart from position 1-100.
+        
+        Args:
+            linear_ctr_data: DataFrame with Pos, Clicks, Impressions, CTR columns
+        """
         fig = go.Figure()
         
-        # Group by position and calculate average CTR
-        position_ctr = df.groupby('Current Position')['CTR'].agg(['mean', 'count']).reset_index()
-        position_ctr = position_ctr[position_ctr['Current Position'] <= 50]
-        
+        # Create smooth downward trend line
         fig.add_trace(go.Scatter(
-            x=position_ctr['Current Position'],
-            y=position_ctr['mean'] * 100,
-            mode='lines+markers',
-            name='CTR',
+            x=linear_ctr_data['Pos'],
+            y=linear_ctr_data['CTR'],
+            mode='lines',
+            name='CTR by Position',
             line=dict(color='#3B82F6', width=3),
-            marker=dict(size=8)
+            fill='tonexty',
+            fillcolor='rgba(59, 130, 246, 0.1)'
         ))
         
         fig.update_layout(
-            title='CTR by Position',
+            title='CTR by Position (Linear 1-100)',
             xaxis_title='Position',
             yaxis_title='CTR (%)',
             height=400,
-            hovermode='x unified'
+            hovermode='x unified',
+            xaxis=dict(
+                range=[1, 100],
+                dtick=10
+            ),
+            yaxis=dict(
+                range=[0, max(linear_ctr_data['CTR'].max() * 1.1, 1)]
+            )
         )
         
         return fig
