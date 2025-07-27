@@ -27,10 +27,10 @@ class SEOForecaster:
 
     def __init__(self):
         """Initialize the SEO forecaster."""
-        # FIXED: More logical scaling for different periods
+        # FIXED: Progressive scaling that ensures 90 < 180 < 360
         self.improvement_scaling = {
-            90: 0.25,   # 25% of full potential in 3 months
-            180: 0.60,  # 60% of full potential in 6 months  
+            90: 0.30,   # 30% of full potential in 3 months
+            180: 0.65,  # 65% of full potential in 6 months 
             360: 1.0    # 100% of full potential in 12 months
         }
 
@@ -64,8 +64,9 @@ class SEOForecaster:
                 keyword_forecasts
             )
 
+            # FIXED: Enhanced traffic value calculation that handles NaN
             traffic_value = self._calculate_traffic_value(
-                keyword_forecasts
+                keyword_forecasts, df
             )
 
             return {
@@ -90,8 +91,6 @@ class SEOForecaster:
     def _calculate_improvement_factor(self, days: int,
                                     avg_improvement: int) -> float:
         """Calculate realistic improvement factor based on time period."""
-        # REMOVED: Old inconsistent logic
-        # NEW: Direct scaling based on time period
         time_scaling = self.improvement_scaling.get(days, days / 360)
         return avg_improvement * time_scaling
 
@@ -110,11 +109,11 @@ class SEOForecaster:
             
             # Apply diminishing returns for already high-ranking keywords
             if current_pos <= 3:
-                max_improvement *= 0.3
+                max_improvement *= 0.4  # Reduced from 0.3 for better scaling
             elif current_pos <= 10:
-                max_improvement *= 0.6
+                max_improvement *= 0.7  # Reduced from 0.6 for better scaling
             else:
-                max_improvement *= 0.9
+                max_improvement *= 1.0  # Full improvement for lower positions
 
             projected_pos = max(1, current_pos - max_improvement)
 
@@ -123,9 +122,6 @@ class SEOForecaster:
 
             current_clicks = search_volume * current_ctr
             projected_clicks = search_volume * projected_ctr
-            
-            # REMOVED: Random variation that made forecasts inconsistent
-            # projected_clicks *= np.random.uniform(0.9, 1.1)
 
             click_increase = projected_clicks - current_clicks
             
@@ -176,32 +172,77 @@ class SEOForecaster:
             'value_increase_pct': round(clicks_increase_pct * 0.95, 1)
         }
 
-    def _calculate_traffic_value(self, keyword_forecasts: pd.DataFrame) -> float:
-        """Calculate estimated traffic value based on clicks and CPC."""
-        # Industry average CPC by search volume ranges
-        cpc_mapping = {
-            0: 0.50,     # Very low volume
-            100: 1.20,   # Low volume
-            1000: 2.50,  # Medium volume
-            10000: 5.00, # High volume
-            50000: 8.00  # Very high volume
-        }
+    def _calculate_traffic_value(self, keyword_forecasts: pd.DataFrame, original_df: pd.DataFrame = None) -> float:
+        """
+        FIXED: Calculate estimated traffic value based on clicks and CPC.
+        Now handles NaN values properly and uses real CPC data when available.
+        """
+        try:
+            total_value = 0
+            
+            # Check if original dataframe has CPC column with real data
+            has_real_cpc = (original_df is not None and 
+                           'CPC' in original_df.columns and 
+                           not original_df['CPC'].isna().all())
+            
+            if has_real_cpc:
+                # Use real CPC data
+                cpc_map = original_df.set_index('Keyword')['CPC'].to_dict()
+                
+                for _, row in keyword_forecasts.iterrows():
+                    keyword = row['Keyword']
+                    clicks = row['Projected Clicks']
+                    
+                    # Get CPC for this keyword, fallback to 0.5
+                    cpc = cpc_map.get(keyword, 0.5)
+                    
+                    # Handle NaN CPC values
+                    if pd.isna(cpc) or np.isinf(cpc):
+                        cpc = 0.5
+                    
+                    # Handle NaN clicks
+                    if pd.isna(clicks) or np.isinf(clicks):
+                        clicks = 0
+                    
+                    total_value += clicks * cpc
+            else:
+                # Use volume-based CPC mapping as fallback
+                cpc_mapping = {
+                    0: 0.50,      # Very low volume
+                    100: 1.20,    # Low volume
+                    1000: 2.50,   # Medium volume
+                    10000: 5.00,  # High volume
+                    50000: 8.00   # Very high volume
+                }
 
-        total_value = 0
-        for _, row in keyword_forecasts.iterrows():
-            volume = row['Search Volume']
-            clicks = row['Projected Clicks']
+                for _, row in keyword_forecasts.iterrows():
+                    volume = row['Search Volume']
+                    clicks = row['Projected Clicks']
 
-            # Find appropriate CPC
-            cpc = 0.50  # Default
-            for vol_threshold, cpc_value in sorted(cpc_mapping.items(), reverse=True):
-                if volume >= vol_threshold:
-                    cpc = cpc_value
-                    break
+                    # Handle NaN values
+                    if pd.isna(volume) or np.isinf(volume):
+                        volume = 0
+                    if pd.isna(clicks) or np.isinf(clicks):
+                        clicks = 0
 
-            total_value += clicks * cpc
+                    # Find appropriate CPC
+                    cpc = 0.50  # Default
+                    for vol_threshold, cpc_value in sorted(cpc_mapping.items(), reverse=True):
+                        if volume >= vol_threshold:
+                            cpc = cpc_value
+                            break
 
-        return round(total_value, 0)
+                    total_value += clicks * cpc
+
+            # Ensure we never return NaN
+            if pd.isna(total_value) or np.isinf(total_value):
+                total_value = 0
+                
+            return round(total_value, 0)
+            
+        except Exception as e:
+            logger.error(f"Error calculating traffic value: {e}")
+            return 0.0
 
     def generate_scenarios(self, df: pd.DataFrame) -> Dict[str, Dict]:
         """Generate multiple forecasting scenarios."""
