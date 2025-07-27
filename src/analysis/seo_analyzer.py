@@ -8,6 +8,20 @@ from typing import Dict, List, Tuple
 logger = logging.getLogger(__name__)
 
 
+def safe_div(numerator, denominator, fallback=0):
+    """Safely divide two numbers, returning fallback if denominator is zero or invalid."""
+    try:
+        if denominator == 0 or pd.isna(denominator) or np.isinf(denominator):
+            return fallback
+        result = numerator / denominator
+        # Check for infinity or NaN result
+        if np.isinf(result) or pd.isna(result):
+            return fallback
+        return result
+    except (ZeroDivisionError, TypeError, ValueError):
+        return fallback
+
+
 class SEOAnalyzer:
     """Analyzes SEO data to calculate CTR and identify opportunities."""
 
@@ -31,7 +45,7 @@ class SEOAnalyzer:
                 df['Current Position'],
                 bins=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 15, 20, 30, 50, 100],
                 labels=['1', '2', '3', '4', '5', '6', '7', '8', '9', '10',
-                        '11-15', '16-20', '21-30', '31-50', '51-100']
+                       '11-15', '16-20', '21-30', '31-50', '51-100']
             )
 
             # Calculate CTR statistics by position
@@ -41,15 +55,18 @@ class SEOAnalyzer:
 
             # Flatten column names
             ctr_stats.columns = ['CTR_Mean', 'CTR_Median', 'CTR_Std',
-                                 'Count', 'CTR_Min', 'CTR_Max']
+                               'Count', 'CTR_Min', 'CTR_Max']
             ctr_stats = ctr_stats.reset_index()
 
-            # Calculate weighted CTR based on volume
+            # Calculate weighted CTR based on volume - using safe_div
             df['Weighted_CTR'] = df['CTR'] * df['Search Volume']
-            weighted_ctr = df.groupby('Position_Bucket').apply(
-                lambda x: x['Weighted_CTR'].sum() / x['Search Volume'].sum()
-                if x['Search Volume'].sum() > 0 else 0
-            ).round(4)
+            
+            def calculate_weighted_ctr(group):
+                total_weighted = group['Weighted_CTR'].sum()
+                total_volume = group['Search Volume'].sum()
+                return safe_div(total_weighted, total_volume, 0)
+            
+            weighted_ctr = df.groupby('Position_Bucket').apply(calculate_weighted_ctr).round(4)
 
             ctr_stats['CTR_Weighted'] = weighted_ctr.values
 
@@ -82,7 +99,7 @@ class SEOAnalyzer:
 
             # Find closest position
             closest_pos = min(default_ctr.keys(),
-                              key=lambda x: abs(x - position))
+                            key=lambda x: abs(x - position))
             return default_ctr[closest_pos]
 
         # Find the appropriate bucket
@@ -127,8 +144,8 @@ class SEOAnalyzer:
             return 0.01  # Default fallback
 
     def identify_opportunities(self, df: pd.DataFrame,
-                               min_volume: int = 100,
-                               max_position: int = 30) -> pd.DataFrame:
+                             min_volume: int = 100,
+                             max_position: int = 30) -> pd.DataFrame:
         """
         Identify keyword opportunities based on volume and position.
 
@@ -152,11 +169,11 @@ class SEOAnalyzer:
                 logger.warning("No opportunities found with current filters")
                 return pd.DataFrame()
 
-            # Calculate opportunity score
+            # Calculate opportunity score using safe_div
             opportunities['Opportunity_Score'] = (
                 opportunities['Search Volume'] *
-                (1 / opportunities['Current Position']) *
-                (1 - opportunities['Keyword Difficulty'] / 100)
+                opportunities.apply(lambda row: safe_div(1, row['Current Position'], 0), axis=1) *
+                opportunities.apply(lambda row: safe_div(100 - row['Keyword Difficulty'], 100, 0), axis=1)
             )
 
             # Calculate potential clicks if improved
@@ -251,7 +268,9 @@ class SEOAnalyzer:
 
             total_volume = df['Search Volume'].sum()
             captured_volume = df[df['Current Position'] <= 10]['Search Volume'].sum()
-            market_share = (captured_volume / total_volume * 100) if total_volume > 0 else 0
+            
+            # Use safe_div for market share calculation
+            market_share = safe_div(captured_volume, total_volume, 0) * 100
 
             return {
                 'total_keywords': total_keywords,
