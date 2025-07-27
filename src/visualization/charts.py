@@ -65,36 +65,66 @@ class ChartGenerator:
     def create_ctr_curve_chart(linear_ctr_data: pd.DataFrame) -> go.Figure:
         """
         FIXED: Create linear CTR curve chart from position 1-100.
+        Now properly displays smooth downward trend using aggregated position data.
         
         Args:
             linear_ctr_data: DataFrame with Pos, Clicks, Impressions, CTR columns
         """
         fig = go.Figure()
         
-        # Create smooth downward trend line
-        fig.add_trace(go.Scatter(
-            x=linear_ctr_data['Pos'],
-            y=linear_ctr_data['CTR'],
-            mode='lines',
-            name='CTR by Position',
-            line=dict(color='#3B82F6', width=3),
-            fill='tonexty',
-            fillcolor='rgba(59, 130, 246, 0.1)'
-        ))
+        # Filter out positions with 0 CTR for cleaner visualization
+        display_data = linear_ctr_data[linear_ctr_data['CTR'] > 0].copy()
         
+        # If no data with CTR > 0, show first 50 positions
+        if display_data.empty:
+            display_data = linear_ctr_data.head(50).copy()
+        
+        # Ensure we have some data to display
+        if not display_data.empty:
+            # Main CTR curve - smooth line
+            fig.add_trace(go.Scatter(
+                x=display_data['Pos'],
+                y=display_data['CTR'],
+                mode='lines',
+                name='CTR by Position',
+                line=dict(color='#3B82F6', width=3),
+                fill='tonexty',
+                fillcolor='rgba(59, 130, 246, 0.1)',
+                hovertemplate='Position: %{x}<br>CTR: %{y:.2f}%<extra></extra>'
+            ))
+            
+            # Add trend markers for better visibility
+            marker_positions = display_data[display_data.index % 5 == 0]  # Every 5th position
+            if not marker_positions.empty:
+                fig.add_trace(go.Scatter(
+                    x=marker_positions['Pos'],
+                    y=marker_positions['CTR'],
+                    mode='markers',
+                    name='Position Markers',
+                    marker=dict(color='#10B981', size=6),
+                    hovertemplate='Position: %{x}<br>CTR: %{y:.2f}%<extra></extra>'
+                ))
+        
+        # Update layout for clean visualization
         fig.update_layout(
             title='CTR by Position (Linear 1-100)',
             xaxis_title='Position',
             yaxis_title='CTR (%)',
             height=400,
             hovermode='x unified',
+            showlegend=False,
             xaxis=dict(
-                range=[1, 100],
-                dtick=10
+                range=[1, max(100, display_data['Pos'].max() if not display_data.empty else 100)],
+                dtick=10,
+                showgrid=True,
+                gridcolor='rgba(128,128,128,0.2)'
             ),
             yaxis=dict(
-                range=[0, max(linear_ctr_data['CTR'].max() * 1.1, 1)]
-            )
+                range=[0, max(display_data['CTR'].max() * 1.1 if not display_data.empty else 1, 1)],
+                showgrid=True,
+                gridcolor='rgba(128,128,128,0.2)'
+            ),
+            plot_bgcolor='white'
         )
         
         return fig
@@ -122,7 +152,7 @@ class ChartGenerator:
         if month_col is None:
             forecast_df['Month'] = range(1, len(forecast_df) + 1)
             month_col = 'Month'
-            
+        
         # If no projected column found, try alternatives
         if projected_col is None:
             if 'Projected Clicks' in forecast_df.columns:
@@ -235,7 +265,7 @@ class ChartGenerator:
             if month_col is None:
                 df['Month'] = range(1, len(df) + 1)
                 month_col = 'Month'
-                
+            
             if traffic_col is None:
                 # Use a default column or create sample data
                 traffic_col = df.columns[0] if len(df.columns) > 0 else 'Traffic'
@@ -298,16 +328,16 @@ class ChartGenerator:
         # Cumulative traffic with safe calculation
         if traffic_col in forecast_df.columns:
             forecast_df['Cumulative Traffic'] = forecast_df[traffic_col].cumsum()
-            
-            fig.add_trace(go.Scatter(
-                x=forecast_df[month_col],
-                y=forecast_df['Cumulative Traffic'],
-                mode='lines+markers',
-                name='Cumulative Traffic',
-                line=dict(color='#10B981', width=3),
-                fill='tonexty',
-                fillcolor='rgba(16, 185, 129, 0.1)'
-            ))
+        
+        fig.add_trace(go.Scatter(
+            x=forecast_df[month_col],
+            y=forecast_df['Cumulative Traffic'],
+            mode='lines+markers',
+            name='Cumulative Traffic',
+            line=dict(color='#10B981', width=3),
+            fill='tonexty',
+            fillcolor='rgba(16, 185, 129, 0.1)'
+        ))
         
         fig.update_layout(
             title='Cumulative Traffic Projection',
