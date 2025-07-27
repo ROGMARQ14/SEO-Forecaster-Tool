@@ -262,9 +262,9 @@ if gsc_file and semrush_file or use_sample:
                                 pct = (count / len(merged_df)) * 100 if len(merged_df) > 0 else 0
                                 st.write(f"• {vol_range}: {count} keywords ({pct:.1f}%)")
 
-                    # Create tabs for different views
-                    tab1, tab2, tab3, tab4 = st.tabs([
-                        "📊 Overview", "🔍 Analysis", "📈 Forecast", "📋 Data"
+                    # FIXED: New tab structure
+                    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+                        "📊 Overview", "🔍 Analysis", "📈 Forecast", "🎯 Opportunity", "📋 Data"
                     ])
 
                     with tab1:
@@ -287,25 +287,34 @@ if gsc_file and semrush_file or use_sample:
                             fig = chart_gen.create_position_distribution_chart(merged_df)
                             st.plotly_chart(fig, use_container_width=True)
 
+                    # FIXED: Analysis tab with new linear CTR table
                     with tab2:
-                        st.header("SEO Analysis")
+                        st.header("CTR Analysis")
 
-                        # CTR Analysis
                         analyzer = SEOAnalyzer()
-                        ctr_df = analyzer.calculate_ctr_by_position(merged_df)
+                        
+                        # FIXED: Use new linear CTR method
+                        linear_ctr_data = analyzer.calculate_ctr_linear_table(merged_df)
 
-                        col1, col2 = st.columns(2)
+                        col1, col2 = st.columns([2, 1])
 
                         with col1:
                             st.subheader("CTR by Position")
-                            fig = chart_gen.create_ctr_curve_chart(merged_df)
+                            # FIXED: Pass linear data to chart
+                            fig = chart_gen.create_ctr_curve_chart(linear_ctr_data)
                             st.plotly_chart(fig, use_container_width=True)
 
                         with col2:
-                            st.subheader("Opportunity Analysis")
-                            opportunities = analyzer.identify_opportunities(merged_df)
-                            st.dataframe(opportunities.head(10),
-                                       use_container_width=True)
+                            st.subheader("Position Data")
+                            # FIXED: Show the requested table with Pos, Clicks, Impressions, CTR
+                            st.dataframe(
+                                linear_ctr_data,
+                                use_container_width=True,
+                                hide_index=True,
+                                column_config={
+                                    "CTR": st.column_config.NumberColumn(format="%.2f%%")
+                                }
+                            )
 
                     with tab3:
                         st.header("SEO Forecast")
@@ -376,7 +385,17 @@ if gsc_file and semrush_file or use_sample:
                                 except Exception as e:
                                     st.warning(f"Could not generate timeline chart: {str(e)}")
 
+                    # FIXED: New Opportunity tab with moved table
                     with tab4:
+                        st.header("Opportunity Analysis")
+                        
+                        opportunities = analyzer.identify_opportunities(merged_df)
+                        if not opportunities.empty:
+                            st.dataframe(opportunities, use_container_width=True, hide_index=True)
+                        else:
+                            st.info("No opportunities found with current filters.")
+
+                    with tab5:
                         st.header("Raw Data")
 
                         # Data download
