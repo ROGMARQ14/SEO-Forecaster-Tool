@@ -1,11 +1,26 @@
 """Data loading and validation utilities."""
 
 import pandas as pd
+import numpy as np
 import streamlit as st
 from typing import Tuple, Optional, Dict, List
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def safe_div(numerator, denominator, fallback=0):
+    """Safely divide two numbers, returning fallback if denominator is zero or invalid."""
+    try:
+        if denominator == 0 or pd.isna(denominator) or np.isinf(denominator):
+            return fallback
+        result = numerator / denominator
+        # Check for infinity or NaN result
+        if np.isinf(result) or pd.isna(result):
+            return fallback
+        return result
+    except (ZeroDivisionError, TypeError, ValueError):
+        return fallback
 
 
 class DataLoader:
@@ -43,6 +58,58 @@ class DataLoader:
         return column_map
     
     @staticmethod
+    def validate_required_columns(df: pd.DataFrame, required_cols: List[str], data_type: str) -> bool:
+        """Validate that all required columns are present before processing."""
+        missing_cols = [col for col in required_cols if col not in df.columns]
+        if missing_cols:
+            st.error(f"Missing required columns in {data_type} data: {missing_cols}")
+            st.info(f"Available columns: {list(df.columns)}")
+            st.info(f"Please ensure your {data_type} export contains all required columns.")
+            return False
+        return True
+    
+    @staticmethod
+    def clean_and_impute_data(df: pd.DataFrame, data_type: str) -> pd.DataFrame:
+        """Clean data and handle missing values strategically."""
+        # Replace infinite values with NaN
+        df.replace([np.inf, -np.inf], np.nan, inplace=True)
+        
+        # Track data quality
+        df['__row_has_nan__'] = df.isna().any(axis=1)
+        nan_rows_count = df['__row_has_nan__'].sum()
+        
+        if nan_rows_count > 0:
+            st.warning(f"Found {nan_rows_count} rows with missing data in {data_type}")
+        
+        # Handle missing data based on column type
+        if data_type == "GSC":
+            # For GSC data, handle numerical columns
+            df['Clicks'] = pd.to_numeric(df['Clicks'], errors='coerce').fillna(0)
+            df['Impressions'] = pd.to_numeric(df['Impressions'], errors='coerce').fillna(0)
+            df['Avg. Pos'] = pd.to_numeric(df['Avg. Pos'], errors='coerce')
+            
+            # Interpolate position data where possible, fallback to median
+            df['Avg. Pos'] = df['Avg. Pos'].interpolate().fillna(df['Avg. Pos'].median())
+            
+            # Calculate CTR safely
+            df['CTR'] = df.apply(lambda row: safe_div(row['Clicks'], row['Impressions'], 0), axis=1)
+            
+        elif data_type == "SEMrush":
+            # For SEMrush data
+            df['Search Volume'] = pd.to_numeric(df['Search Volume'], errors='coerce').fillna(0)
+            df['Keyword Difficulty'] = pd.to_numeric(df['Keyword Difficulty'], errors='coerce').fillna(50)  # median difficulty
+            df['Position'] = pd.to_numeric(df['Position'], errors='coerce').fillna(100)  # worst position
+            df['URL'] = df['URL'].fillna("Unknown")
+        
+        # Remove rows where critical columns are still missing
+        critical_cols = ['Query', 'Keyword'] if data_type == "GSC" else ['Keyword']
+        for col in critical_cols:
+            if col in df.columns:
+                df = df[df[col].notna() & (df[col] != '')]
+        
+        return df
+    
+    @staticmethod
     @st.cache_data
     def load_gsc_data(file) -> Optional[pd.DataFrame]:
         """Load Google Search Console data from uploaded file."""
@@ -67,23 +134,23 @@ class DataLoader:
                 DataLoader.GSC_COLUMN_MAPPINGS
             )
             
-            # Check if all required columns are found
-            missing_cols = set(DataLoader.GSC_COLUMN_MAPPINGS.keys()) - set(column_map.keys())
-            if missing_cols:
-                st.error(f"Missing columns: {missing_cols}")
-                st.info(f"Available columns: {list(df.columns)}")
+            # Validate required columns early
+            if not DataLoader.validate_required_columns(df, list(column_map.values()), "GSC"):
                 return None
             
             # Rename columns to standard names
             df = df.rename(columns=column_map)
             
+            # Validate we have the expected columns after mapping
+            required_cols = ['Query', 'Clicks', 'Impressions', 'Avg. Pos']
+            if not DataLoader.validate_required_columns(df, required_cols, "GSC"):
+                return None
+            
             # Clean and standardize data
             df['Query'] = df['Query'].astype(str).str.strip()
-            df['Clicks'] = pd.to_numeric(df['Clicks'], errors='coerce').fillna(0)
-            df['Impressions'] = pd.to_numeric(df['Impressions'], errors='coerce').fillna(0)
-            df['CTR'] = df['Clicks'] / df['Impressions']
-            df['CTR'] = df['CTR'].fillna(0)
-            df['Avg. Pos'] = pd.to_numeric(df['Avg. Pos'], errors='coerce')
+            
+            # Clean and impute data
+            df = DataLoader.clean_and_impute_data(df, "GSC")
             
             # Select only required columns
             df = df[['Query', 'Clicks', 'Impressions', 'CTR', 'Avg. Pos']].copy()
@@ -124,22 +191,23 @@ class DataLoader:
                 DataLoader.SEMRUSH_COLUMN_MAPPINGS
             )
             
-            # Check if all required columns are found
-            missing_cols = set(DataLoader.SEMRUSH_COLUMN_MAPPINGS.keys()) - set(column_map.keys())
-            if missing_cols:
-                st.error(f"Missing columns: {missing_cols}")
-                st.info(f"Available columns: {list(df.columns)}")
+            # Validate required columns early
+            if not DataLoader.validate_required_columns(df, list(column_map.values()), "SEMrush"):
                 return None
             
             # Rename columns to standard names
             df = df.rename(columns=column_map)
             
+            # Validate we have the expected columns after mapping
+            required_cols = ['Keyword', 'Search Volume', 'Keyword Difficulty', 'Position', 'URL']
+            if not DataLoader.validate_required_columns(df, required_cols, "SEMrush"):
+                return None
+            
             # Clean and standardize data
             df['Keyword'] = df['Keyword'].astype(str).str.strip()
-            df['Search Volume'] = pd.to_numeric(df['Search Volume'], errors='coerce').fillna(0)
-            df['Keyword Difficulty'] = pd.to_numeric(df['Keyword Difficulty'], errors='coerce').fillna(0)
-            df['Position'] = pd.to_numeric(df['Position'], errors='coerce').fillna(100)
-            df['URL'] = df['URL'].astype(str).str.strip()
+            
+            # Clean and impute data
+            df = DataLoader.clean_and_impute_data(df, "SEMrush")
             
             # Select only required columns
             df = df[['Keyword', 'Search Volume', 'Keyword Difficulty', 'Position', 'URL']].copy()
@@ -164,8 +232,7 @@ class DataLoader:
         
         # Ensure CTR is calculated in GSC data
         if 'CTR' not in gsc_df.columns:
-            gsc_df['CTR'] = gsc_df['Clicks'] / gsc_df['Impressions']
-            gsc_df['CTR'] = gsc_df['CTR'].fillna(0)
+            gsc_df['CTR'] = gsc_df.apply(lambda row: safe_div(row['Clicks'], row['Impressions'], 0), axis=1)
         
         # Merge on keyword
         merged_df = pd.merge(
@@ -175,7 +242,7 @@ class DataLoader:
             how='inner'
         )
         
-        # Calculate additional metrics
+        # Calculate additional metrics safely
         merged_df['Potential Traffic'] = (
             merged_df['Search Volume'] * 
             merged_df['CTR']
@@ -198,8 +265,14 @@ class DataLoader:
                 'total_clicks': 0,
                 'total_volume': 0,
                 'avg_difficulty': 0,
-                'quality_score': 0
+                'quality_score': 0,
+                'rows_with_nan': 0,
+                'inf_values_replaced': 0,
+                'columns_imputed': 0
             }
+        
+        # Check for data quality issues
+        rows_with_nan = df.get('__row_has_nan__', pd.Series([False])).sum()
         
         metrics = {
             'total_keywords': len(df),
@@ -211,10 +284,53 @@ class DataLoader:
                 100, max(
                     0, 100 - (df['Current Position'].mean() / 10)
                 )
-            )
+            ),
+            'rows_with_nan': int(rows_with_nan),
+            'inf_values_replaced': 0,  # This would be tracked during cleaning
+            'columns_imputed': 0  # This would be tracked during cleaning
         }
         
         return metrics
+    
+    @staticmethod
+    def get_data_quality_report(df: pd.DataFrame) -> Dict[str, any]:
+        """Generate comprehensive data quality report."""
+        if df.empty:
+            return {
+                'summary': 'No data available',
+                'issues': [],
+                'recommendations': []
+            }
+        
+        issues = []
+        recommendations = []
+        
+        # Check for common data quality issues
+        if '__row_has_nan__' in df.columns:
+            nan_count = df['__row_has_nan__'].sum()
+            if nan_count > 0:
+                issues.append(f"{nan_count} rows contained missing values (handled)")
+                recommendations.append("Consider data export settings to minimize missing values")
+        
+        # Check position data quality
+        if 'Current Position' in df.columns:
+            avg_pos = df['Current Position'].mean()
+            if avg_pos > 50:
+                issues.append(f"Average position is high ({avg_pos:.1f})")
+                recommendations.append("Focus on improving rankings for better forecasting accuracy")
+        
+        # Check volume data
+        if 'Search Volume' in df.columns:
+            low_volume_count = len(df[df['Search Volume'] < 10])
+            if low_volume_count > 0:
+                issues.append(f"{low_volume_count} keywords have very low search volume")
+                recommendations.append("Consider filtering out very low-volume keywords")
+        
+        return {
+            'summary': f"Analyzed {len(df)} keywords with {len(issues)} issues identified",
+            'issues': issues,
+            'recommendations': recommendations
+        }
     
     @staticmethod
     def get_sample_data() -> Tuple[pd.DataFrame, pd.DataFrame]:
