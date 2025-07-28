@@ -79,7 +79,8 @@ class SEOAnalyzer:
 
     def calculate_ctr_linear_table(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        NEW METHOD: Calculate linear CTR table for positions 1-100.
+        FIXED: Calculate linear CTR table for positions 1-100.
+        Now properly calculates individual CTR for each position without broken smoothing.
         
         Args:
             df: DataFrame with merged GSC/SEMrush data
@@ -104,20 +105,32 @@ class SEOAnalyzer:
                 how='left'
             ).fillna(0)
             
-            # Calculate CTR using safe_div
+            # FIXED: Calculate CTR correctly for each position individually
             merged['CTR'] = merged.apply(
-                lambda row: safe_div(row['Clicks'], row['Impressions']) * 100, 
+                lambda row: safe_div(row['Clicks'], row['Impressions']) * 100 if row['Impressions'] > 0 else 0.0, 
                 axis=1
             )
             
-            # Apply smoothing to ensure monotonic decrease
-            merged['CTR'] = merged['CTR'].cummax()[::-1].cummin()[::-1]
+            # OPTIONAL: Apply PROPER monotonic smoothing only where it makes sense
+            # This ensures CTR generally decreases as position increases, but preserves real data
+            for i in range(1, len(merged)):
+                # Only apply smoothing if current CTR is significantly higher than previous and we have real data
+                if (merged.iloc[i]['CTR'] > merged.iloc[i-1]['CTR'] * 1.5 and 
+                    merged.iloc[i]['Impressions'] > 0 and 
+                    merged.iloc[i-1]['Impressions'] > 0):
+                    # Use a weighted average instead of just copying
+                    merged.iloc[i, merged.columns.get_loc('CTR')] = (
+                        merged.iloc[i]['CTR'] * 0.3 + merged.iloc[i-1]['CTR'] * 0.7
+                    )
+            
+            # Round CTR to 2 decimal places
+            merged['CTR'] = merged['CTR'].round(2)
             
             # Convert clicks and impressions to int for display
             merged[['Clicks', 'Impressions']] = merged[['Clicks', 'Impressions']].astype(int)
             
             return merged[['Pos', 'Clicks', 'Impressions', 'CTR']]
-            
+        
         except Exception as e:
             logger.error(f"Error calculating linear CTR table: {e}")
             raise
