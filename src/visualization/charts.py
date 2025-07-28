@@ -65,62 +65,88 @@ class ChartGenerator:
     def create_ctr_curve_chart(linear_ctr_data: pd.DataFrame) -> go.Figure:
         """
         FIXED: Create linear CTR curve chart from position 1-100.
-        Now properly displays smooth downward trend using aggregated position data.
+        Now properly displays individual CTR for each position without smoothing artifacts.
         
         Args:
             linear_ctr_data: DataFrame with Pos, Clicks, Impressions, CTR columns
         """
         fig = go.Figure()
         
-        # Filter out positions with 0 CTR for cleaner visualization
-        display_data = linear_ctr_data[linear_ctr_data['CTR'] > 0].copy()
+        # Use all data, but highlight positions with actual traffic
+        display_data = linear_ctr_data.copy()
         
-        # If no data with CTR > 0, show first 50 positions
-        if display_data.empty:
-            display_data = linear_ctr_data.head(50).copy()
+        # Separate positions with real data vs. zero data for better visualization
+        has_data = display_data[display_data['Impressions'] > 0]
+        no_data = display_data[display_data['Impressions'] == 0]
         
-        # Ensure we have some data to display
-        if not display_data.empty:
-            # Main CTR curve - smooth line
+        # Show positions with real data as solid line
+        if not has_data.empty:
             fig.add_trace(go.Scatter(
-                x=display_data['Pos'],
-                y=display_data['CTR'],
-                mode='lines',
-                name='CTR by Position',
+                x=has_data['Pos'],
+                y=has_data['CTR'],
+                mode='lines+markers',
+                name='Positions with Traffic',
                 line=dict(color='#3B82F6', width=3),
-                fill='tonexty',
-                fillcolor='rgba(59, 130, 246, 0.1)',
-                hovertemplate='Position: %{x}<br>CTR: %{y:.2f}%<extra></extra>'
+                marker=dict(size=8, color='#3B82F6'),
+                hovertemplate='<b>Position:</b> %{x}<br>' +
+                             '<b>CTR:</b> %{y:.2f}%<br>' +
+                             '<b>Clicks:</b> %{customdata[0]}<br>' +
+                             '<b>Impressions:</b> %{customdata[1]}<extra></extra>',
+                customdata=has_data[['Clicks', 'Impressions']].values
             ))
-            
-            # Add trend markers for better visibility
-            marker_positions = display_data[display_data.index % 5 == 0]  # Every 5th position
-            if not marker_positions.empty:
-                fig.add_trace(go.Scatter(
-                    x=marker_positions['Pos'],
-                    y=marker_positions['CTR'],
-                    mode='markers',
-                    name='Position Markers',
-                    marker=dict(color='#10B981', size=6),
-                    hovertemplate='Position: %{x}<br>CTR: %{y:.2f}%<extra></extra>'
-                ))
+        
+        # Show positions without data as dotted line at 0%
+        if not no_data.empty and len(no_data) < 50:  # Only show if not too many points
+            fig.add_trace(go.Scatter(
+                x=no_data['Pos'],
+                y=no_data['CTR'],
+                mode='markers',
+                name='Positions without Traffic',
+                marker=dict(size=4, color='#94A3B8', opacity=0.5),
+                hovertemplate='<b>Position:</b> %{x}<br>' +
+                             '<b>CTR:</b> %{y:.2f}%<br>' +
+                             '<b>No traffic data</b><extra></extra>'
+            ))
+        
+        # Add industry benchmark line for reference
+        industry_positions = list(range(1, 21))  # Show first 20 positions
+        industry_ctr = [31.7, 24.7, 18.7, 13.1, 9.2, 7.2, 5.1, 4.0, 3.1, 2.5,
+                       2.2, 1.9, 1.6, 1.4, 1.2, 1.0, 0.9, 0.8, 0.7, 0.6]
+        
+        fig.add_trace(go.Scatter(
+            x=industry_positions,
+            y=industry_ctr,
+            mode='lines',
+            name='Industry Benchmark',
+            line=dict(color='#94A3B8', width=2, dash='dash'),
+            opacity=0.7,
+            hovertemplate='<b>Position:</b> %{x}<br>' +
+                         '<b>Industry CTR:</b> %{y:.1f}%<extra></extra>'
+        ))
         
         # Update layout for clean visualization
         fig.update_layout(
-            title='CTR by Position (Linear 1-100)',
+            title='CTR by Position - Your Data vs Industry Benchmark',
             xaxis_title='Position',
             yaxis_title='CTR (%)',
-            height=400,
+            height=500,
             hovermode='x unified',
-            showlegend=False,
+            showlegend=True,
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="right",
+                x=1
+            ),
             xaxis=dict(
-                range=[1, max(100, display_data['Pos'].max() if not display_data.empty else 100)],
-                dtick=10,
+                range=[1, min(100, max(display_data['Pos']) + 5) if not display_data.empty else 20],
+                dtick=5,
                 showgrid=True,
                 gridcolor='rgba(128,128,128,0.2)'
             ),
             yaxis=dict(
-                range=[0, max(display_data['CTR'].max() * 1.1 if not display_data.empty else 1, 1)],
+                range=[0, max(display_data['CTR'].max() * 1.1 if not display_data.empty else 35, 5)],
                 showgrid=True,
                 gridcolor='rgba(128,128,128,0.2)'
             ),
