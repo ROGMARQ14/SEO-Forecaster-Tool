@@ -208,11 +208,11 @@ class SEOForecaster:
             else:
                 # Use volume-based CPC mapping as fallback
                 cpc_mapping = {
-                    0: 0.50,      # Very low volume
-                    100: 1.20,    # Low volume
-                    1000: 2.50,   # Medium volume
-                    10000: 5.00,  # High volume
-                    50000: 8.00   # Very high volume
+                    0: 0.50,     # Very low volume
+                    100: 1.20,   # Low volume
+                    1000: 2.50,  # Medium volume
+                    10000: 5.00, # High volume
+                    50000: 8.00  # Very high volume
                 }
 
                 for _, row in keyword_forecasts.iterrows():
@@ -237,9 +237,9 @@ class SEOForecaster:
             # Ensure we never return NaN
             if pd.isna(total_value) or np.isinf(total_value):
                 total_value = 0
-                
-            return round(total_value, 0)
             
+            return round(total_value, 0)
+        
         except Exception as e:
             logger.error(f"Error calculating traffic value: {e}")
             return 0.0
